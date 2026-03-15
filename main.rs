@@ -90,11 +90,11 @@ fn main() -> Result<()> {
         config_path
     );
     for rule in &config.rules {
-        info!("  • {}", rule.name);
-    }
-    info!("Loaded {} deadline rule(s)", config.deadline_rules.len());
-    for rule in &config.deadline_rules {
-        info!("  • {} (uid–command deadline: {})", rule.name, rule.deadline);
+        if let Some(ref d) = rule.deadline {
+            info!("  • {} (deadline: {})", rule.name, d);
+        } else {
+            info!("  • {} (immediate)", rule.name);
+        }
     }
 
     // ── PID file ──────────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ fn main() -> Result<()> {
 
     // ── Rule matcher ──────────────────────────────────────────────────────────
 
-    let mut matcher = RuleMatcher::new(config.rules, config.deadline_rules);
+    let mut matcher = RuleMatcher::new(config.rules);
 
     // ── Main event loop ───────────────────────────────────────────────────────
 

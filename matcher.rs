@@ -8,7 +8,7 @@
 //! Deadline rules: when a sudo invocation matches a UID–command pair with a
 //! deadline, the process is tracked and killed only after the deadline has passed.
 
-use crate::config::{parse_deadline, Action, DeadlineRule, MatchCondition, Rule};
+use crate::config::{parse_deadline, Action, MatchCondition, Rule};
 use crate::event::SudoEvent;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
@@ -28,54 +28,37 @@ struct TrackedDeadline {
 
 pub struct RuleMatcher {
     rules: Vec<Rule>,
-    deadline_rules: Vec<DeadlineRule>,
     /// PIDs currently under a deadline; killed when Instant::now() >= deadline.
     tracked: HashMap<u32, TrackedDeadline>,
 }
 
 impl RuleMatcher {
-    pub fn new(rules: Vec<Rule>, deadline_rules: Vec<DeadlineRule>) -> Self {
+    pub fn new(rules: Vec<Rule>) -> Self {
         Self {
             rules,
-            deadline_rules,
             tracked: HashMap::new(),
         }
     }
 
-    /// Evaluate all rules against `event`; apply action on the first match
-    /// (or on every match when `stop_on_match = false`).
-    /// Then, if any deadline rule matches (UID–command pair), track the process
-    /// and kill it only after its deadline.
+    /// Evaluate all rules against `event`. Immediate rules (no `deadline`) fire
+    /// their action on match; rules with `deadline` track the process and kill
+    /// only after the deadline. `stop_on_match` applies only to immediate rules.
     pub fn process(&mut self, event: &SudoEvent) {
         for rule in &self.rules {
-            if matches_rule(&rule.match_, event) {
-                if rule.action.log {
-                    info!(
-                        rule  = %rule.name,
-                        pid   = event.pid,
-                        uid   = event.uid,
-                        auid  = event.auid,
-                        tty   = %event.tty,
-                        args  = ?event.args,
-                        "Rule matched — sending {}",
-                        signal_name(&rule.action),
-                    );
-                }
-                apply_action(&rule.action, event);
-                if rule.stop_on_match {
-                    return;
-                }
+            if !matches_rule(&rule.match_, event) {
+                continue;
             }
-        }
 
-        // Track matching UID–command pairs with deadlines (kill only after deadline).
-        for rule in &self.deadline_rules {
-            if matches_deadline_rule(rule, event) {
-                let duration = match parse_deadline(&rule.deadline) {
+            if let Some(ref deadline_str) = rule.deadline {
+                // Deadline rule: match_ (including optional command) already validated above.
+                let duration = match parse_deadline(deadline_str) {
                     Ok(d) if !d.is_zero() => d,
                     Ok(_) => continue,
                     Err(e) => {
-                        warn!("Invalid deadline '{}' in rule '{}': {}", rule.deadline, rule.name, e);
+                        warn!(
+                            "Invalid deadline '{}' in rule '{}': {}",
+                            deadline_str, rule.name, e
+                        );
                         continue;
                     }
                 };
@@ -107,6 +90,25 @@ impl RuleMatcher {
                         starttime,
                     },
                 );
+                continue;
+            }
+
+            // Immediate rule: apply action now.
+            if rule.action.log {
+                info!(
+                    rule  = %rule.name,
+                    pid   = event.pid,
+                    uid   = event.uid,
+                    auid  = event.auid,
+                    tty   = %event.tty,
+                    args  = ?event.args,
+                    "Rule matched — sending {}",
+                    signal_name(&rule.action),
+                );
+            }
+            apply_action(&rule.action, event);
+            if rule.stop_on_match {
+                return;
             }
         }
     }
@@ -241,39 +243,27 @@ fn matches_rule(cond: &MatchCondition, ev: &SudoEvent) -> bool {
         }
     }
 
+    // Command filter (executable name, first arg after sudo).
+    if !matches_command(cond.command.as_deref(), ev) {
+        return false;
+    }
+
     // All specified conditions matched.
     true
 }
 
-/// Match a deadline rule: UID (uids or uid_range) and command.
-/// Command is the executable name: for SYSCALL/EXECVE it's args[1]; for USER_CMD
-/// the audit log may give either the post-sudo argv (args[1] = "sh") or the full
-/// command line (args = ["sudo", "sudo", "-u", "user1", "sh"]), so we also match
-/// when the rule's command equals or is a suffix of the last arg.
-fn matches_deadline_rule(rule: &DeadlineRule, ev: &SudoEvent) -> bool {
-    if let Some(uids) = &rule.uids {
-        if !uids.contains(&ev.uid) {
-            return false;
-        }
-    }
-    if let Some([lo, hi]) = rule.uid_range {
-        if ev.uid < lo || ev.uid > hi {
-            return false;
-        }
-    }
-    if rule.uids.is_none() && rule.uid_range.is_none() {
-        return false;
-    }
-    let matches_cmd = |c: &str| c == rule.command || c.ends_with(&rule.command);
+/// Match the event's executed command against the rule's command (if set).
+/// If `opt_command` is None, matches any event (true). Otherwise the event's
+/// command (args[1] or last arg) must equal or end with the given string.
+fn matches_command(opt_command: Option<&str>, ev: &SudoEvent) -> bool {
+    let command = match opt_command {
+        Some(c) => c,
+        None => return true,
+    };
+    let matches_cmd = |c: &str| c == command || c.ends_with(command);
     let first = ev.args.get(1).map(String::as_str);
     let last = ev.args.last().map(String::as_str);
-    if first.map_or(false, matches_cmd) {
-        return true;
-    }
-    if last.map_or(false, matches_cmd) {
-        return true;
-    }
-    false
+    first.map_or(false, matches_cmd) || last.map_or(false, matches_cmd)
 }
 
 // ── Kill logic ────────────────────────────────────────────────────────────────

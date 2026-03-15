@@ -58,24 +58,20 @@ log_level = "info"   # or trace, debug, warn, error
 
 `RUST_LOG` overrides `log_level` when set (e.g. `RUST_LOG=debug`).
 
-### Immediate rules
+### Rules (immediate and deadline)
 
-Each `[[rules]]` has:
+A single `[[rules]]` array supports both:
+
+- **Immediate rules** — No `deadline` field. On match, the action (signal, etc.) is applied at once.
+- **Deadline rules** — Set `deadline` (e.g. `"30s"`, `"5m"`, `"1h"`). Matching invocations are tracked and killed only when the deadline is exceeded; no immediate kill.
+
+Each rule has:
 
 - **`name`** — Log label.
-- **`[rules.match]`** — Optional: `uids`, `uid_range`, `exclude_uids`, `args_contain`, `args_not_contain`, `no_tty`, `tty`, `match_all`, etc.
+- **`[rules.match]`** — Optional: `uids`, `uid_range`, `exclude_uids`, `args_contain`, `args_not_contain`, `command`, `no_tty`, `tty`, `match_all`, etc. For deadline rules, **`command`** is the executable (first arg after sudo); matching supports suffix (e.g. `sh` matches `/bin/sh`).
 - **`[rules.action]`** — `signal` (SIGKILL/SIGTERM), `kill_children`, `log`.
-- **`stop_on_match`** — If true, no further rules are evaluated after a match.
-
-### Deadline rules
-
-Each `[[deadline_rules]]` has:
-
-- **`name`**, **`uids`** or **`uid_range`**, **`command`** — Command is the executable (first arg after sudo); matching supports suffix (e.g. `sh` matches `/bin/sh`).
-- **`deadline`** — Max runtime, e.g. `30s`, `5m`, `1h`.
-- **`action`** — Same as immediate rules (signal, kill_children, log).
-
-Matching invocations are tracked; they are killed only when the deadline is exceeded. Tracking is cleared when the process exits (USER_END or process no longer exists) or when the deadline passes (after verifying the PID by start time).
+- **`stop_on_match`** — If true (default), no further rules are evaluated after an **immediate** rule matches. Does not apply to deadline rules.
+- **`deadline`** — Optional. If set, this rule is deadline-based (track and kill after the duration); if omitted, the rule is immediate.
 
 ## Run
 

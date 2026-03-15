@@ -23,6 +23,16 @@
 //! args_contain = ["/etc/sudoers", "/etc/sudoers.d"]
 //! [rules.action]
 //! signal = "SIGKILL"
+//!
+//! # Deadline rule: track and kill after 5m (optional [rules.match] command).
+//! [[rules]]
+//! name = "limit-sh-5m"
+//! deadline = "5m"
+//! [rules.match]
+//! uid_range = [1000, 1999]
+//! command = "sh"
+//! [rules.action]
+//! signal = "SIGKILL"
 //! ```
 
 use anyhow::Result;
@@ -35,13 +45,10 @@ pub struct Config {
     #[serde(default)]
     pub daemon: DaemonConfig,
 
+    /// All rules (immediate and deadline-based). Rules with `deadline` set are
+    /// tracked and killed after the duration; others fire immediately on match.
     #[serde(default)]
     pub rules: Vec<Rule>,
-
-    /// UID–command pairs with deadlines: matching invocations are tracked and
-    /// killed only after the deadline has passed.
-    #[serde(default)]
-    pub deadline_rules: Vec<DeadlineRule>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -67,8 +74,13 @@ pub struct Rule {
     pub action: Action,
 
     /// If `true` (default), no further rules are evaluated once this one fires.
+    /// Only applies to immediate (non-deadline) rules.
     #[serde(default = "default_true")]
     pub stop_on_match: bool,
+
+    /// If set, this rule is deadline-based: matching invocations are tracked and
+    /// killed only after this duration (e.g. `"30s"`, `"5m"`, `"1h"`). No immediate kill.
+    pub deadline: Option<String>,
 }
 
 // ── Match conditions ──────────────────────────────────────────────────────────
@@ -110,6 +122,11 @@ pub struct MatchCondition {
     /// Useful for blocking non-interactive / scripted sudo invocations.
     pub no_tty: Option<bool>,
 
+    /// Match the executed command (first arg after "sudo"). If set, the event's
+    /// command must equal or end with this string (e.g. `"sh"` matches `sh`, `/bin/sh`).
+    /// Used as an extra filter for immediate rules; required for deadline semantics.
+    pub command: Option<String>,
+
     // ── Catch-all ─────────────────────────────────────────────────────────────
 
     /// If `true`, match every sudo invocation regardless of other conditions.
@@ -142,30 +159,6 @@ impl Default for Action {
             log: true,
         }
     }
-}
-
-// ── Deadline rules (UID–command pairs with deadlines) ──────────────────────
-
-/// A rule that tracks matching sudo invocations and kills them after the deadline.
-#[derive(Debug, Deserialize)]
-pub struct DeadlineRule {
-    pub name: String,
-
-    /// Match: real UID in this list.
-    pub uids: Option<Vec<u32>>,
-    /// Match: real UID in [low, high] (inclusive).
-    pub uid_range: Option<[u32; 2]>,
-
-    /// Match: the executed command (first arg after "sudo") equals or ends with this.
-    /// e.g. "bash" matches "bash", "/bin/bash"; "/usr/bin/vim" matches exactly.
-    pub command: String,
-
-    /// Maximum allowed runtime. After this duration the process is killed.
-    /// Format: number + unit: "30s", "5m", "1h".
-    pub deadline: String,
-
-    #[serde(default)]
-    pub action: Action,
 }
 
 /// Parse a deadline string ("30s", "5m", "1h") into a duration in seconds.

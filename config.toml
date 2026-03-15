@@ -93,25 +93,34 @@ log           = true
 # log           = true
 
 
-# ── Deadline rules (UID–command pairs) ────────────────────────────────────────
+# ── Deadline rules (same [[rules]], add deadline + optional command) ────────────
 #
-# Matching invocations are tracked and killed only after the deadline has passed.
-# Use uids or uid_range to match UID; command matches the first arg after "sudo"
-# (the executed program, e.g. "bash", "/bin/bash", "vim").
-# Deadline format: number + unit: "30s", "5m", "1h".
+# Rules with `deadline` set are tracked and killed only after the duration.
+# Use [rules.match] uids/uid_range and optional `command` (executable name).
+# Deadline format: "30s", "5m", "1h".
 
-# Limit sudo bash to 5 minutes for contractors (UID 2000–2999).
-[[deadline_rules]]
+# Limit sudo sh to 1 minute for UIDs 1000–2999.
+[[rules]]
 name = "all-sh-1m"
+deadline = "1m"
+
+[rules.match]
 uid_range = [1000, 2999]
 command = "sh"
-deadline = "1m"
-action = { signal = "SIGKILL", kill_children = true, log = true }
+
+[rules.action]
+signal        = "SIGKILL"
+kill_children = true
+log           = true
 
 # Limit sudo vim to 10 minutes for specific users.
-# [[deadline_rules]]
+# [[rules]]
 # name = "vim-10m-for-devs"
+# deadline = "10m"
+# [rules.match]
 # uids = [1001, 1002]
 # command = "vim"
-# deadline = "10m"
-# action = { signal = "SIGTERM", kill_children = true, log = true }
+# [rules.action]
+# signal        = "SIGTERM"
+# kill_children = true
+# log           = true

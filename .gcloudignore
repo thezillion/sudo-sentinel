@@ -1,0 +1,30 @@
+# Build output (rebuild on the target)
+target/
+
+# Version control
+.git/
+.gitignore
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local env / secrets
+.env
+.env.*
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug artifacts
+*.pdb
+*.dSYM/
+
+# Optional: uncomment to skip docs when copying
+# *.md
+# TEST-*.md
