@@ -1,0 +1,29 @@
+# Build output
+/target/
+
+# Cargo lock is usually committed for binaries; uncomment for libraries
+# Cargo.lock
+
+# Debug
+*.pdb
+*.dSYM/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local env / override
+.env
+.env.local
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rustfmt / Clippy
+rustfmt.toml
+.clippy.toml

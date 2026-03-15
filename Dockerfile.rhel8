@@ -1,0 +1,23 @@
+# Dockerfile for testing sudo-sentinel in a RHEL8-compatible container
+# Build:  podman build -f Dockerfile.rhel8 -t sudo-sentinel-test .
+# Run:   See TEST-RHEL8-CONTAINER.md
+
+FROM registry.access.redhat.com/ubi8/ubi:8 AS builder
+RUN dnf install -y gcc && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
+    . /root/.cargo/env && rustc --version
+WORKDIR /build
+COPY Cargo.toml Cargo.lock* ./
+COPY src ./src
+RUN . /root/.cargo/env && cargo build --release
+
+FROM registry.access.redhat.com/ubi8/ubi:8
+RUN dnf install -y sudo && dnf clean all
+RUN mkdir -p /etc/sudo-sentinel /usr/local/sbin
+COPY --from=builder /build/target/release/sudo-sentinel /usr/local/sbin/sudo-sentinel
+COPY config.toml /etc/sudo-sentinel/config.toml
+# Ensure a non-root user can use sudo for testing (optional)
+RUN echo 'ALL ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/test
+RUN chmod 440 /etc/sudoers.d/test
+# Default: run sentinel in foreground so logs are visible
+CMD ["/usr/local/sbin/sudo-sentinel", "/etc/sudo-sentinel/config.toml"]

@@ -1,0 +1,117 @@
+# /etc/sudo-sentinel/config.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# sudo-sentinel configuration
+#
+# Rules are evaluated top-to-bottom.  The first match fires its action and
+# stops evaluation unless `stop_on_match = false` is set on that rule.
+#
+# All fields in [rules.match] are optional.  Omitting a field means "don't
+# filter on this criterion."  Multiple fields are ANDed together.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[daemon]
+# Override the RUST_LOG filter.  Options: trace, debug, info, warn, error.
+log_level = "info"
+# Optional PID file.
+# pid_file = "/run/sudo-sentinel.pid"
+
+
+# ── Example rules ─────────────────────────────────────────────────────────────
+
+# 1. Block all sudo invocations by users in the "contractor" UID band.
+#    These accounts (uid 2000–2999) must never escalate privileges.
+[[rules]]
+name = "block-contractors"
+stop_on_match = true
+
+[rules.match]
+uid_range = [2000, 2999]
+
+[rules.action]
+signal        = "SIGKILL"
+kill_children = true
+log           = true
+
+
+# 2. Block attempts to edit sensitive files, regardless of who is asking.
+#    Matches `sudo vim /etc/sudoers`, `sudo nano /etc/sudoers.d/90-myfile`, etc.
+[[rules]]
+name = "block-editing-sudoers"
+stop_on_match = true
+
+[rules.match]
+args_contain = ["/etc/sudoers"]
+
+[rules.action]
+signal        = "SIGKILL"
+kill_children = true
+log           = true
+
+
+# 3. Block specific users by UID.
+#    Equivalent to a deny-list for known compromised or departed accounts.
+[[rules]]
+name = "block-specific-uids"
+stop_on_match = true
+
+[rules.match]
+uids = [1042, 1099]
+
+[rules.action]
+signal        = "SIGKILL"
+kill_children = true
+log           = true
+
+
+# 4. Block non-interactive (no-TTY) sudo usage by unprivileged users.
+#    Catches automated scripts or cron jobs using sudo without a terminal.
+#    Exempts root (uid 0) using exclude_uids.
+[[rules]]
+name = "block-headless-sudo"
+stop_on_match = false      # continue evaluating other rules too
+
+[rules.match]
+no_tty       = true
+exclude_uids = [0]
+
+[rules.action]
+signal        = "SIGTERM"   # SIGTERM first; the process group kill catches children
+kill_children = true
+log           = true
+
+
+# 5. Catch-all audit rule: log every sudo invocation without killing.
+#    Useful for building an inventory before adding blocking rules.
+#    Set signal to something harmless, or remove in production.
+# [[rules]]
+# name = "audit-all-sudo"
+# [rules.match]
+# match_all = true
+# [rules.action]
+# signal        = "SIGKILL"   # ← change to active kill when ready
+# kill_children = true
+# log           = true
+
+
+# ── Deadline rules (UID–command pairs) ────────────────────────────────────────
+#
+# Matching invocations are tracked and killed only after the deadline has passed.
+# Use uids or uid_range to match UID; command matches the first arg after "sudo"
+# (the executed program, e.g. "bash", "/bin/bash", "vim").
+# Deadline format: number + unit: "30s", "5m", "1h".
+
+# Limit sudo bash to 5 minutes for contractors (UID 2000–2999).
+[[deadline_rules]]
+name = "all-sh-1m"
+uid_range = [1000, 2999]
+command = "sh"
+deadline = "1m"
+action = { signal = "SIGKILL", kill_children = true, log = true }
+
+# Limit sudo vim to 10 minutes for specific users.
+# [[deadline_rules]]
+# name = "vim-10m-for-devs"
+# uids = [1001, 1002]
+# command = "vim"
+# deadline = "10m"
+# action = { signal = "SIGTERM", kill_children = true, log = true }

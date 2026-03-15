@@ -1,0 +1,55 @@
+# /etc/systemd/system/sudo-sentinel.service
+#
+# Install:
+#   cp sudo-sentinel /usr/local/sbin/
+#   mkdir -p /etc/sudo-sentinel
+#   cp config.toml /etc/sudo-sentinel/config.toml
+#   systemctl daemon-reload
+#   systemctl enable --now sudo-sentinel
+
+[Unit]
+Description=sudo-sentinel — kill sudo invocations matching policy rules
+Documentation=https://github.com/yourorg/sudo-sentinel
+# Start after syslog so our log output is captured.
+After=syslog.target network.target
+# If auditd is present, start after it so it has first claim on the
+# unicast audit socket (we use the multicast group, so this is advisory).
+After=auditd.service
+# We do NOT hard-depend on auditd — sentinel works standalone too.
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/sudo-sentinel /etc/sudo-sentinel/config.toml
+ExecStop=/bin/kill -TERM $MAINPID
+
+# Security hardening — we must keep the capabilities we need and nothing more.
+User=root
+# Allow reading /proc and sending signals to all processes.
+AmbientCapabilities=CAP_KILL CAP_AUDIT_CONTROL CAP_AUDIT_WRITE CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_KILL CAP_AUDIT_CONTROL CAP_AUDIT_WRITE CAP_NET_ADMIN
+
+# Restrict what the daemon itself can do.
+NoNewPrivileges=yes
+ProtectSystem=strict          # /usr, /boot, /etc read-only
+ProtectHome=yes
+PrivateTmp=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service @network-io
+
+# Restart policy.
+Restart=on-failure
+RestartSec=2s
+
+# Give the daemon a few seconds to remove its audit rule on SIGTERM.
+TimeoutStopSec=10
+
+# Logging.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sudo-sentinel
+
+[Install]
+WantedBy=multi-user.target
